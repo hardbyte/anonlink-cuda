@@ -32,13 +32,8 @@ void dice(float *out,
           int bsize) {{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
-    
-
     if (i > asize || j > bsize || i > j)
         return;
-    
-    // bitwise and for all {bflen} elements
-    // a[i] & b[j]
 
     unsigned pc = 0, t;
     for (int k = 0; k < {bflen}; ++k) {{
@@ -56,7 +51,6 @@ def generate_random_encoding(number_of_encodings=2**20, n_bits=1024):
     maxval = 2 ** 32 - 1
     assert n_bits % 32 == 0, "nbits must be divisible by 32"
     size = number_of_encodings * bflen
-
     return cp.random.randint(0, maxval, size=size, dtype='uint32')
 
 
@@ -80,8 +74,8 @@ def test_dice_kernel(size_a=2**10, size_b=2**14):
 
     similarities = cp.zeros((size_a, size_b), dtype=cp.float32)
 
-    a_threads_per_block = 32
-    b_threads_per_block = 32
+    a_threads_per_block = 16
+    b_threads_per_block = 16
     threads_per_block = (a_threads_per_block, b_threads_per_block)
 
     nblocks_a = size_a // a_threads_per_block
@@ -101,14 +95,15 @@ def test_dice_kernel(size_a=2**10, size_b=2**14):
     return similarities
 
 
-for size in [2**10, 2**12]:
+for i in range(5):
+    size = 2**14
     start_time = time.time()
     s = test_dice_kernel(size, size).get()
     elapsed = time.time() - start_time
     comparisons = size*size/2
 
     cmp_per_sec = comparisons/elapsed
-    print(f"{size}^2  {cmp_per_sec:.0f} ({humanize.intword(cmp_per_sec)}) cmp/s")
+    print(f"{size}^2  ({humanize.intword(cmp_per_sec)}) cmp/s")
 
 
 # popcnt_shared_memory = cp.RawKernel(f'''
