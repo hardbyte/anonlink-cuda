@@ -1,6 +1,7 @@
 import humanize
 import time
 import cupy as cp
+from cupy import prof
 
 encoding_size_in_bits = 1024
 bflen = encoding_size_in_bits // 32
@@ -48,7 +49,9 @@ void popcnt(unsigned *out, const unsigned *x, int outsz) {{
     const unsigned *y = x + tid * {bflen};
     unsigned pc = 0, t;
     for (int i = 0; i < {bflen}; ++i) {{
+        
         asm ("popc.b32 %0, %1;" : "=r"(t) : "r"(y[i]));
+
         pc += t;
     }}
     out[tid] = pc;
@@ -81,6 +84,36 @@ void dice(float *out,
 ''', 'dice')
 
 
+dice_kernel_all_in_one = cp.RawKernel(f'''
+extern "C" __global__
+void dice(float *out, 
+          const unsigned *A, 
+          const unsigned *B, 
+          int asize, 
+          int bsize) {{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i > asize || j > bsize || i > j)
+        return;
+
+    unsigned a, b;
+    unsigned pop_a = 0, pop_b = 0, pop_ab = 0;
+    unsigned t;
+    for (int k = 0; k < {bflen}; ++k) {{
+        a = A[i*{bflen} + k];
+        b = B[j*{bflen} + k];
+        unsigned a_and_b = a & b;
+
+        pop_a += __popc(a);
+        pop_b += __popc(b);
+        pop_ab += __popc(a_and_b);
+    }}
+
+    out[i * bsize + j] = 2.0*pop_ab/(pop_a + pop_b);
+}}
+''', 'dice')
+
+
 def generate_random_encoding(number_of_encodings=2**20, n_bits=1024):
     maxval = 2 ** 32 - 1
     assert n_bits % 32 == 0, "nbits must be divisible by 32"
@@ -89,7 +122,7 @@ def generate_random_encoding(number_of_encodings=2**20, n_bits=1024):
 
 
 def popcount_vector(encoding_vector):
-    threads_per_block = 512
+    threads_per_block = 128
     input_size = len(encoding_vector)
     output_size = input_size//bflen
     assert input_size % threads_per_block == 0, 'nthreads must divide array size'
@@ -100,14 +133,17 @@ def popcount_vector(encoding_vector):
     return output_popcount
 
 
+@cp.prof.TimeRangeDecorator()
 def test_dice_kernel(size_a=2**10, size_b=2**14):
     input_a = generate_random_encoding(size_a)
     input_b = generate_random_encoding(size_b)
 
-    popcnt_a = popcount_vector(input_a)
-    popcnt_b = popcount_vector(input_b)
+    #popcnt_a = popcount_vector(input_a)
+    #popcnt_b = popcount_vector(input_b)
+    start_time = time.time()
 
     similarities = cp.zeros((size_a, size_b), dtype=cp.float32)
+
 
     a_threads_per_block = 16
     b_threads_per_block = 16
@@ -117,74 +153,74 @@ def test_dice_kernel(size_a=2**10, size_b=2**14):
     nblocks_b = size_b // b_threads_per_block
     nblocks = (nblocks_a, nblocks_b)
 
-    dice_kernel(nblocks, threads_per_block, (
+    dice_kernel_all_in_one(nblocks, threads_per_block, (
         similarities,
         input_a,
         input_b,
-        popcnt_a,
-        popcnt_b,
         size_a,
         size_b
     ))
 
+    # dice_kernel(nblocks, threads_per_block, (
+    #     similarities,
+    #     input_a,
+    #     input_b,
+    #     popcnt_a,
+    #     popcnt_b,
+    #     size_a,
+    #     size_b
+    # ))
+
+    cp.cuda.Stream.null.synchronize()
+    #data = similarities.get()
+    elapsed = time.time() - start_time
+    comparisons = size_a * size_b / 2
+
+    cmp_per_sec = comparisons / elapsed
+    print(f"{size}^2  ({humanize.intword(cmp_per_sec)}) cmp/s")
+
     return similarities
 
 
-# for i in range(5):
-#     size = 2**14
-#     start_time = time.time()
-#     s = test_dice_kernel(size, size).get()
-#     elapsed = time.time() - start_time
-#     comparisons = size*size/2
-#
-#     cmp_per_sec = comparisons/elapsed
-#     print(f"{size}^2  ({humanize.intword(cmp_per_sec)}) cmp/s")
-#
+for i in range(5):
+    size = 2**15
+
+    #cp.cuda.profiler.start()
+    s = test_dice_kernel(size, size).get()
+    #cp.cuda.profiler.stop()
+
 
 
 # Test
-def test_dice(n):
+def test_popcounting(n):
 
     maxval = 2**32 - 1
     input_a = cp.random.randint(0, maxval, size=n, dtype='uint32')
-    input_b = cp.random.randint(0, maxval, size=n, dtype='uint32')
     assert n % bflen == 0, 'bflen must divide array size'
     output_size = n // bflen
 
     assert n % threads_per_block == 0, 'nthreads must divide array size'
     nblocks = (output_size + threads_per_block - 1) // threads_per_block
 
-    start_time = time.time()
     popcnt_a = cp.zeros(output_size, dtype='uint32')
-    popcnt_b = cp.zeros(output_size, dtype='uint32')
-    popcnt_a_and_b = cp.zeros(output_size, dtype='uint32')
 
-    print(output_size)
-    print(len(input_a))
+    start_time = time.time()
 
-    popcnt_shared_memory((nblocks,),
-                         (threads_per_block,),
-                         (popcnt_a, input_a, output_size))
-    #print(popcnt_a.get()[:10])
+    # popcnt_shared_memory((nblocks,),
+    #                      (threads_per_block,),
+    #                      (popcnt_a, input_a, output_size))
+    #
 
-    #popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_b, input_b, output_size))
+    popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_a, input_a, output_size))
     popcount_time = time.time()
 
-    a_and_b = cp.bitwise_and(input_a, input_b)
-    popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_a_and_b, a_and_b, output_size))
+    #a_and_b = cp.bitwise_and(input_a, input_b)
+    #popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_a_and_b, a_and_b, output_size))
 
+    print(f"Popcount {n} encodings of {encoding_size_in_bits} in {popcount_time - start_time}s")
     return popcnt_a
-    #
-    # dice_time = time.time()
-    # print(f"Compared {n} encodings of {encoding_size_in_bits} in {dice_time - start_time}s")
-    # print(f"{n/(dice_time - start_time):.1f} cmp/s")
 
 
-
-x = test_dice(512*32).get()
-print(len(x))
-print(x[x>1])
-print(x[:10])
 
 
 #print(timeit.timeit(stmt=test_dice, number=10))
