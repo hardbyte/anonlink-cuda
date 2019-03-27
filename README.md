@@ -18,5 +18,12 @@ https://docs-cupy.chainer.org/en/stable/reference/sparse.html#conversion-to-from
 
 # Benchmarking
 
-50 M cmp/s/cpucore
+Single CPU using [anonlink](https://github.com/n1analytics/anonlink):
 
+50 M cmp/s
+
+Current speed on a GTX 1080
+
+1.3 B cmp/s (without transferring the data back to the host)
+
+120 M cmp/s including data transfer
