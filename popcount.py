@@ -5,6 +5,40 @@ import cupy as cp
 encoding_size_in_bits = 1024
 bflen = encoding_size_in_bits // 32
 
+
+threads_per_block = 128
+popcnt_shared_memory = cp.RawKernel(f'''
+extern "C" __global__
+void mypopcnt(unsigned *out, const unsigned *x, int outsz) {{
+    __shared__ unsigned int y[{bflen} * {threads_per_block}];
+
+    int tid = blockDim.x * blockIdx.x + threadIdx.x;
+    
+    if (tid >= outsz)
+        return;
+
+    for (int i = threadIdx.x; i < {bflen} * {threads_per_block}; i += {threads_per_block}) {{
+        int index = i + blockDim.x * blockIdx.x * {bflen};
+        if (i >= {bflen} * {threads_per_block})
+            printf("OUT OF RNGE: %d, %d\\n", i, threadIdx.x);
+        
+        // So y[i] is broken.
+        y[i] = x[index];
+        //y[0] = 1;
+    }}
+    
+    __syncthreads();
+    
+    //const unsigned *y = x + tid * {bflen};
+    unsigned pc = 0, t;
+    for (int i = 0; i < {bflen}; ++i) {{
+        asm ("popc.b32 %0, %1;" : "=r"(t) : "r"(y[threadIdx.x * {bflen} + i]));
+        pc += t;
+    }}
+    out[tid] = pc;
+}}
+''', 'mypopcnt')
+
 popcnt_kernel = cp.RawKernel(f'''
 extern "C" __global__
 void popcnt(unsigned *out, const unsigned *x, int outsz) {{
@@ -62,6 +96,7 @@ def popcount_vector(encoding_vector):
     nblocks = input_size // threads_per_block
     output_popcount = cp.zeros(output_size, dtype='uint32')
     popcnt_kernel((nblocks,), (threads_per_block,), (output_popcount, encoding_vector, output_size))
+    #popcnt_shared_memory((nblocks,), (threads_per_block,), (output_popcount, encoding_vector, output_size))
     return output_popcount
 
 
@@ -95,42 +130,21 @@ def test_dice_kernel(size_a=2**10, size_b=2**14):
     return similarities
 
 
-for i in range(5):
-    size = 2**14
-    start_time = time.time()
-    s = test_dice_kernel(size, size).get()
-    elapsed = time.time() - start_time
-    comparisons = size*size/2
+# for i in range(5):
+#     size = 2**14
+#     start_time = time.time()
+#     s = test_dice_kernel(size, size).get()
+#     elapsed = time.time() - start_time
+#     comparisons = size*size/2
+#
+#     cmp_per_sec = comparisons/elapsed
+#     print(f"{size}^2  ({humanize.intword(cmp_per_sec)}) cmp/s")
+#
 
-    cmp_per_sec = comparisons/elapsed
-    print(f"{size}^2  ({humanize.intword(cmp_per_sec)}) cmp/s")
-
-
-# popcnt_shared_memory = cp.RawKernel(f'''
-#
-#  __global__
-# void mypopcnt(unsigned *out, const unsigned *x, int outsz) {{
-#     __shared__ unsigned y[{bflen} * {threads_per_block}];
-#
-#     int tid = blockDim.x * blockIdx.x + threadIdx.x;
-#     if (tid >= outsz)
-#         return;
-#
-#     for (int i = 0; i < {bflen} * {threads_per_block}; i += {threads_per_block})
-#         y[i] = x[i + tid * {bflen}];
-#
-#     //const unsigned *y = x + tid * {bflen};
-#     unsigned pc = 0, t;
-#     for (int i = 0; i < {bflen}; ++i) {{
-#         asm ("popc.b32 %0, %1;" : "=r"(t) : "r"(y[tid * {bflen} + i]));
-#         pc += t;
-#     }}
-#     out[tid] = pc;
-# }}
-# ''', 'mypopcnt')
 
 # Test
-def test_dice(n=2**10):
+def test_dice(n):
+
     maxval = 2**32 - 1
     input_a = cp.random.randint(0, maxval, size=n, dtype='uint32')
     input_b = cp.random.randint(0, maxval, size=n, dtype='uint32')
@@ -138,39 +152,40 @@ def test_dice(n=2**10):
     output_size = n // bflen
 
     assert n % threads_per_block == 0, 'nthreads must divide array size'
-    nblocks = n // threads_per_block
+    nblocks = (output_size + threads_per_block - 1) // threads_per_block
 
     start_time = time.time()
     popcnt_a = cp.zeros(output_size, dtype='uint32')
     popcnt_b = cp.zeros(output_size, dtype='uint32')
     popcnt_a_and_b = cp.zeros(output_size, dtype='uint32')
-    similarities = cp.zeros(output_size*output_size, dtype='uint32')
 
-    popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_a, input_a, output_size))
-    popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_b, input_b, output_size))
+    print(output_size)
+    print(len(input_a))
+
+    popcnt_shared_memory((nblocks,),
+                         (threads_per_block,),
+                         (popcnt_a, input_a, output_size))
+    #print(popcnt_a.get()[:10])
+
+    #popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_b, input_b, output_size))
     popcount_time = time.time()
 
     a_and_b = cp.bitwise_and(input_a, input_b)
     popcnt_kernel((nblocks,), (threads_per_block,), (popcnt_a_and_b, a_and_b, output_size))
 
-    # compute the similarities for the diag
-    #similarities = 2*popcnt_a_and_b/(popcnt_a+popcnt_b)
+    return popcnt_a
+    #
+    # dice_time = time.time()
+    # print(f"Compared {n} encodings of {encoding_size_in_bits} in {dice_time - start_time}s")
+    # print(f"{n/(dice_time - start_time):.1f} cmp/s")
 
 
-    dice_time = time.time()
-    print(f"Compared {n} encodings of {encoding_size_in_bits} in {dice_time - start_time}s")
-    print(f"{n/(dice_time - start_time):.1f} cmp/s")
 
+x = test_dice(512*32).get()
+print(len(x))
+print(x[x>1])
+print(x[:10])
 
-    return similarities
-
-
-#
-# x = test_dice(1<<20).get()
-# print(len(x))
-# print(x[x>1])
-# print(x[:10])
-#test_dice(n=(1<<28))
 
 #print(timeit.timeit(stmt=test_dice, number=10))
 
