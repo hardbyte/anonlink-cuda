@@ -1,7 +1,9 @@
 import humanize
 import time
 import cupy as cp
-
+import numpy as np
+import anonlink
+from bitarray import bitarray
 from chunking import chunk
 from filtering import apply_threshold
 
@@ -16,7 +18,9 @@ void dice(float *out,
           const unsigned *A, 
           const unsigned *B, 
           int asize, 
-          int bsize) {{
+          int bsize,
+          float threshold
+          ) {{
 
     __shared__ unsigned shared_A[16 * 32];
     __shared__ unsigned shared_B[16 * 32];
@@ -24,8 +28,6 @@ void dice(float *out,
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    // Note a factor of 2 if you can avoid half the work...
-    //if (i > asize || j > bsize || blockIdx.x > blockIdx.y)
     if (i > asize || j > bsize )
         return;
 
@@ -48,18 +50,20 @@ void dice(float *out,
         pop_ab += __popc(a_and_b);
     }}
 
-    out[i * bsize + j] = 2.0 * pop_ab / (pop_a + pop_b);
+    float score = 2.0 * pop_ab / (pop_a + pop_b);
+    score = score > threshold ? score : 0.0;
+    out[i * bsize + j] = score;
 }}
 ''', 'dice')
 
 
 def generate_random_encoding(number_of_encodings=2**20):
     maxval = 2 ** 32 - 1
-    size = number_of_encodings * bflen
-    return cp.random.randint(0, maxval, size=size, dtype='uint32')
+    size = (number_of_encodings, bflen)
+    return np.random.randint(0, maxval, size=size, dtype='uint32')
 
 
-def compute_similarities(input_a, input_b, chunk_id=0):
+def compute_similarities(input_a, input_b, chunk_id, threshold):
     start_time = time.time()
     size_a, size_b = len(input_a)//32, len(input_b)//32
 
@@ -78,10 +82,11 @@ def compute_similarities(input_a, input_b, chunk_id=0):
         input_a,
         input_b,
         size_a,
-        size_b
+        size_b,
+        cp.float32(threshold)
     ))
 
-    sparse_similarities = apply_threshold(similarities, size_a, size_b, threshold=0.75)
+    sparse_similarities, num_results = apply_threshold(similarities, size_a, size_b, threshold=threshold)
 
     cp.cuda.Stream.null.synchronize()
 
@@ -94,39 +99,65 @@ def compute_similarities(input_a, input_b, chunk_id=0):
 
     transfer_time = time.time() - start_time
 
-    comparisons = size_a * size_b / 2
+    comparisons = size_a * size_b
     cmp_per_sec = comparisons / compute_time
 
     if chunk_id % 1 == 0:
-        print(f"{chunk_id}: Comparisons: {humanize.intword(comparisons)}  ({humanize.intword(cmp_per_sec)}) cmp/s. Computation: {compute_time:.3f} Result transfer: {transfer_time:.6f}s")
+        print(f"{chunk_id}: Comparisons: {humanize.intword(comparisons)}, Rate: {humanize.intword(cmp_per_sec)} cmp/s. Computation: {compute_time:.3f} Result transfer: {transfer_time:.6f}s")
 
-    return data
+    return data, num_results
 
 
-def test_dice_kernel(size_a=2**10, size_b=2**14):
+def numpy_array_to_bitarray(a):
+    ba = bitarray()
+    ba.frombytes(a.tobytes())
+    return ba
+
+
+def test_dice_kernel(size_a=2**10, size_b=2**14, skip_anonlink=True):
     input_a = generate_random_encoding(size_a)
     input_b = generate_random_encoding(size_b)
 
+    a_ba = [numpy_array_to_bitarray(a) for a in input_a]
+    b_ba = [numpy_array_to_bitarray(a) for a in input_b]
+
+    input_a = cp.asarray(input_a.ravel())
+    input_b = cp.asarray(input_b.ravel())
+
+    t = 0.55
+
+    if not skip_anonlink:
+        print("Computing in anonlink")
+        start = time.time()
+        z = anonlink.similarities.dice_coefficient([a_ba, b_ba], threshold=t)
+        end = time.time()
+        print(f"Anonlink computing {humanize.intword(size_a*size_b)} comparisons took a total time {end - start:.2f}")
+
     results = []
+    num_results = 0
 
     for i, (c1, c2) in enumerate(chunk(input_a, input_b)):
         a_start, a_end = c1['range']
         b_start, b_end = c2['range']
 
-        res = compute_similarities(
+        res, count = compute_similarities(
             input_a[a_start:a_end],
             input_b[b_start:b_end],
-            chunk_id=i
+            chunk_id=i,
+            threshold=t
         )
         results.append(res)
+        num_results += count
 
     return results
 
 
 for i in range(1):
-    size = 2**22
+    size = 2**21
+    start = time.time()
     s = test_dice_kernel(size, size)
+    end = time.time()
 
-
+    print(f"CUDA computing {humanize.intword(size**2)} comparisons took a total time {end - start:.2f}")
 
 

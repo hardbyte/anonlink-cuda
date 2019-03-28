@@ -14,7 +14,7 @@ https://docs-cupy.chainer.org/en/stable/reference/sparse.html#conversion-to-from
 * think about sharing a `__device__` function for `popcount`
 
 * need to validate against anonlink/cpu that it is correct
-* profile
+* profile `nvprof -f -o pyprof.nvprof python cudadice.py`
 * sorting the edges by distance on the gpu.
 
 # Benchmarking
