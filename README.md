@@ -15,6 +15,7 @@ https://docs-cupy.chainer.org/en/stable/reference/sparse.html#conversion-to-from
 
 * need to validate against anonlink/cpu that it is correct
 * profile
+* sorting the edges by distance on the gpu.
 
 # Benchmarking
 
