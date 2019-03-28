@@ -6,6 +6,7 @@ verify_ssl = true
 [dev-packages]
 
 [packages]
+anonlink = "*"
 cupy = "*"
 cupy-cuda80 = "*"
 humanize = "*"
