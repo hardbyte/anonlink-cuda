@@ -7,9 +7,8 @@ verify_ssl = true
 
 [packages]
 cupy = "*"
-jupyterlab = "*"
-matplotlib = "*"
 cupy-cuda80 = "*"
+humanize = "*"
 
 [requires]
 python_version = "3.7"

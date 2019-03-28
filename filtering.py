@@ -1,7 +1,6 @@
 import cupy as cp
 from cupyx.scipy.sparse import coo_matrix
 
-
 def apply_threshold(data, size_a, size_b, threshold=0.75):
     data = data.ravel()
 
