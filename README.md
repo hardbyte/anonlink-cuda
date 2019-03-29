@@ -1,21 +1,35 @@
 
-An early attempt at running anonlink similarity scores on the GPU.
+An early attempt at running anonlink similarity scores on the GPU using `cupy`.
 
-Currently using `cupy`.
 
+## Running 
+
+To run you will need cuda v8.0 or later. Install deps with:
+
+    python -m pipenv shell
+
+Run the main test with:
+
+    python cudadice.py
+
+### Running with the profiler
+
+
+`nvprof -f -o pyprof.nvprof python cudadice.py`
+
+Then open pyprof.nvprof in NVIDIA Visual Profiler 
 
 
 
 ## Things to consider
 
-* Before transfer back to host convert to sparse array and apply threshold.
-https://docs-cupy.chainer.org/en/stable/reference/sparse.html#conversion-to-from-cupy-ndarrays
-
-* think about sharing a `__device__` function for `popcount`
 
 * need to validate against anonlink/cpu that it is correct
-* profile `nvprof -f -o pyprof.nvprof python cudadice.py`
-* sorting the edges by distance on the gpu.
+
+* merge sorting the returned edges on the CPU while the GPU is busy
+
+* streaming
+
 
 # Benchmarking
 
@@ -23,8 +37,6 @@ Single CPU using [anonlink](https://github.com/n1analytics/anonlink):
 
 50 M cmp/s
 
-Current speed on a GTX 1080
+Current speed on a GTX 1080:
 
-1.3 B cmp/s (without transferring the data back to the host)
-
-120 M cmp/s including data transfer
+1.3 B cmp/s including data transfer

@@ -152,11 +152,12 @@ def test_dice_kernel(size_a=2**10, size_b=2**14, skip_anonlink=True):
         results.append(res)
         num_results += count
 
+    # TODO need to merge sort the results...
     return results
 
 
 for i in range(1):
-    size = 2**21
+    size = 2**16
     start = time.time()
     s = test_dice_kernel(size, size)
     end = time.time()
