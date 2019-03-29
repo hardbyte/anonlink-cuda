@@ -13,23 +13,20 @@ def apply_threshold(data, size_a, size_b, threshold=None):
     row_index = cp.arange(size_a).repeat(size_b)
 
     # apply threshold (~4ms)
-    #threshold = 0.5 if threshold is None else threshold
     mask = data > threshold
 
     masked_data = data[mask]
-
-    num_results = len(mask[mask])
+    num_results = len(masked_data)
 
     print("Num results in CUDA: ", num_results)
-    if num_results > 0:
-        masked_index_a = col_index[mask]
-        masked_index_b = row_index[mask]
+    masked_index_a = col_index[mask]
+    masked_index_b = row_index[mask]
 
-        # Convert to sparse matrix (on device)
-        s = coo_matrix((masked_data, (masked_index_b, masked_index_a)))
-    else:
-        print("empty results")
-        s = coo_matrix((size_a, size_b), dtype=cp.float32)
+    # Convert to sparse matrix (on device)
+    s = coo_matrix((masked_data,
+                    (masked_index_b, masked_index_a)
+                    ),
+                   shape=(size_a, size_b))
 
     return s, num_results
 
