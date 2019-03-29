@@ -6,6 +6,7 @@ import anonlink
 from bitarray import bitarray
 from chunking import chunk
 from filtering import apply_threshold
+from sorting import sort_sparse_similarities
 
 encoding_size_in_bits = 1024
 assert encoding_size_in_bits % 32 == 0, "nbits in encoding must be divisible by 32"
@@ -88,6 +89,8 @@ def compute_similarities(input_a, input_b, chunk_id, threshold):
 
     sparse_similarities, num_results = apply_threshold(similarities, size_a, size_b, threshold=threshold)
 
+    sort_sparse_similarities(sparse_similarities)
+
     cp.cuda.Stream.null.synchronize()
 
     compute_time = time.time() - start_time
@@ -159,5 +162,4 @@ for i in range(1):
     end = time.time()
 
     print(f"CUDA computing {humanize.intword(size**2)} comparisons took a total time {end - start:.2f}")
-
 
