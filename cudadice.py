@@ -87,7 +87,7 @@ def compute_similarities(input_a, input_b, chunk_id, threshold):
         cp.float32(threshold)
     ))
 
-    sparse_similarities, num_results = apply_threshold(similarities, size_a, size_b, threshold=threshold)
+    sparse_similarities = apply_threshold(similarities, size_a, size_b, threshold=threshold)
 
     sort_sparse_similarities(sparse_similarities)
 
@@ -108,7 +108,7 @@ def compute_similarities(input_a, input_b, chunk_id, threshold):
     if chunk_id % 1 == 0:
         print(f"{chunk_id}: Comparisons: {humanize.intword(comparisons)}, Rate: {humanize.intword(cmp_per_sec)} cmp/s. Computation: {compute_time:.3f} Result transfer: {transfer_time:.6f}s")
 
-    return data, num_results
+    return data, len(data.data)
 
 
 def numpy_array_to_bitarray(a):

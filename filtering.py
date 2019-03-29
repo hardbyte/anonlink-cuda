@@ -3,32 +3,9 @@ from cupyx.scipy.sparse import coo_matrix
 
 
 def apply_threshold(data, size_a, size_b, threshold=None):
-    # could stay in 2d
-    data = data.ravel()
-
-    # 2d indices into our 1d array
-
-    # Maybe not necessary here
-    col_index = cp.tile(cp.arange(size_b), size_a)
-    row_index = cp.arange(size_a).repeat(size_b)
-
-    # apply threshold (~4ms)
     mask = data > threshold
-
-    masked_data = data[mask]
-    num_results = len(masked_data)
-
-    print("Num results in CUDA: ", num_results)
-    masked_index_a = col_index[mask]
-    masked_index_b = row_index[mask]
-
-    # Convert to sparse matrix (on device)
-    s = coo_matrix((masked_data,
-                    (masked_index_b, masked_index_a)
-                    ),
-                   shape=(size_a, size_b))
-
-    return s, num_results
+    indices = cp.where(mask)
+    return coo_matrix((data[mask], indices), shape=(size_a, size_b))
 
 
 if __name__ == '__main__':
