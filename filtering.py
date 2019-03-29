@@ -5,7 +5,7 @@ from cupyx.scipy.sparse import coo_matrix
 def apply_threshold(data, size_a, size_b, threshold=None):
     mask = data > threshold
     indices = cp.where(mask)
-    return coo_matrix((data[mask], indices), shape=(size_a, size_b))
+    return coo_matrix((data[mask], indices), shape=(size_a, size_b), dtype=cp.float32)
 
 
 if __name__ == '__main__':

@@ -14,8 +14,10 @@ bflen = encoding_size_in_bits // 32
 
 
 dice_kernel = cp.RawKernel(f'''
+#include <cuda_fp16.h>
+
 extern "C" __global__
-void dice(float *out, 
+void dice(half *out, 
           const unsigned *A, 
           const unsigned *B, 
           int asize, 
@@ -53,9 +55,9 @@ void dice(float *out,
 
     float score = 2.0 * pop_ab / (pop_a + pop_b);
     score = score > threshold ? score : 0.0;
-    out[i * bsize + j] = score;
+    out[i * bsize + j] = __float2half(score);
 }}
-''', 'dice')
+''', 'dice', ('-I/opt/cuda/include',))
 
 
 def generate_random_encoding(number_of_encodings=2**20):
@@ -68,7 +70,7 @@ def compute_similarities(input_a, input_b, chunk_id, threshold):
     start_time = time.time()
     size_a, size_b = len(input_a)//32, len(input_b)//32
 
-    similarities = cp.zeros((size_a, size_b), dtype=cp.float32)
+    similarities = cp.zeros((size_a, size_b), dtype=cp.float16)
 
     a_threads_per_block = 16
     b_threads_per_block = 16
